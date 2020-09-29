@@ -72,8 +72,6 @@ std::map<std::string, float> eventWeights = {
 template <typename T>
 auto MinimalSelection(T &df) {
     return df.Filter("HLT_IsoMu17_eta2p1_LooseIsoPFTau20 == true", "Passes trigger")
-             .Filter("nMuon > 0", "nMuon > 0")
-             .Filter("nTau > 0", "nTau > 0");
 }
 
 
@@ -82,7 +80,7 @@ auto MinimalSelection(T &df) {
  */
 template <typename T>
 auto FindGoodMuons(T &df) {
-    return df.Define("goodMuons", "abs(Muon_eta) < 2.1 && Muon_pt > 17 && Muon_tightId == true");
+    return df.Define("goodMuons", "BOOLEAN CONDITIONS GO HERE");
 }
 
 
@@ -95,9 +93,7 @@ auto FindGoodMuons(T &df) {
  */
 template <typename T>
 auto FindGoodTaus(T &df) {
-    return df.Define("goodTaus", "Tau_charge != 0 && abs(Tau_eta) < 2.3 && Tau_pt > 20 &&\
-                                  Tau_idDecayMode == true && Tau_idIsoTight == true && \
-                                  Tau_idAntiEleTight == true && Tau_idAntiMuTight == true");
+    return df.Define("goodTaus", "Tau_charge != 0 && abs(Tau_eta) < 2.3 && Tau_pt > 20 && BOOLEAN ID CONDITIONS HERE");
 }
 
 
@@ -111,7 +107,6 @@ auto FilterGoodEvents(T &df) {
              .Filter("Sum(goodMuons) > 0", "Event has good muons");
 }
 
-
 /*
  * Helper function to compute the difference in the azimuth coordinate taking
  * the boundary conditions at 2 * pi into account.
@@ -120,16 +115,16 @@ namespace Helper {
 template <typename T>
 float DeltaPhi(T v1, T v2, const T c = M_PI)
 {
-    auto r = std::fmod(v2 - v1, 2.0 * c);
-    if (r < -c) {
-        r += 2.0 * c;
-    }
-    else if (r > c) {
-        r -= 2.0 * c;
-    }
-    return r;
+  auto r = std::fmod(v2 - v1, 2.0 * c);
+  if (r < -c) {
+    r += 2.0 * c;
+  }
+  else if (r > c) {
+    r -= 2.0 * c;
+  }
+  return r;
 }
-}
+
 
 
 /*
@@ -141,65 +136,62 @@ float DeltaPhi(T v1, T v2, const T c = M_PI)
  */
 template <typename T>
 auto FindMuonTauPair(T &df) {
-    using namespace ROOT::VecOps;
-    auto build_pair = [](RVec<int>& goodMuons, RVec<float>& pt_1, RVec<float>& eta_1, RVec<float>& phi_1,
-                         RVec<int>& goodTaus, RVec<float>& iso_2, RVec<float>& eta_2, RVec<float>& phi_2)
-            {
-                 // Get indices of all possible combinations
-                 auto comb = Combinations(pt_1, eta_2);
-                 const auto numComb = comb[0].size();
-
-                 // Find valid pairs based on delta r
-                 std::vector<int> validPair(numComb, 0);
-                 for(size_t i = 0; i < numComb; i++) {
-                     const auto i1 = comb[0][i];
-                     const auto i2 = comb[1][i];
-                     if(goodMuons[i1] == 1 && goodTaus[i2] == 1) {
-                         const auto deltar = sqrt(
+  using namespace ROOT::VecOps;
+  auto build_pair = [](RVec<int>& goodMuons, RVec<float>& pt_1, RVec<float>& eta_1, RVec<float>& phi_1,
+		       RVec<int>& goodTaus, RVec<float>& iso_2, RVec<float>& eta_2, RVec<float>& phi_2)
+  {
+    // Get indices of all possible combinations
+    auto comb = Combinations(pt_1, eta_2);
+    const auto numComb = comb[0].size();
+    
+    // Find valid pairs based on delta r
+    std::vector<int> validPair(numComb, 0);
+    for(size_t i = 0; i < numComb; i++) {
+      const auto i1 = comb[0][i];
+      const auto i2 = comb[1][i];
+      if(goodMuons[i1] == 1 && goodTaus[i2] == 1) {
+	const auto deltar = sqrt(
                                  pow(eta_1[i1] - eta_2[i2], 2) +
                                  pow(Helper::DeltaPhi(phi_1[i1], phi_2[i2]), 2));
-                         if (deltar > 0.5) {
-                             validPair[i] = 1;
-                         }
-                     }
-                 }
-
-                 // Find best muon based on pt
-                 int idx_1 = -1;
-                 float maxPt = -1;
-                 for(size_t i = 0; i < numComb; i++) {
-                     if(validPair[i] == 0) continue;
-                     const auto tmp = comb[0][i];
-                     if(maxPt < pt_1[tmp]) {
-                         maxPt = pt_1[tmp];
-                         idx_1 = tmp;
-                     }
-                 }
-
-                 // Find best tau based on iso
-                 int idx_2 = -1;
-                 float minIso = 999;
-                 for(size_t i = 0; i < numComb; i++) {
-                     if(validPair[i] == 0) continue;
-                     if(int(comb[0][i]) != idx_1) continue;
-                     const auto tmp = comb[1][i];
-                     if(minIso > iso_2[tmp]) {
-                         minIso = iso_2[tmp];
-                         idx_2 = tmp;
-                     }
-                 }
-
-                 return std::vector<int>({idx_1, idx_2});
-            };
-
-    return df.Define("pairIdx", build_pair,
-                     {"goodMuons", "Muon_pt", "Muon_eta", "Muon_phi",
-                      "goodTaus", "Tau_relIso_all", "Tau_eta", "Tau_phi"})
-             .Define("idx_1", "pairIdx[0]")
-             .Define("idx_2", "pairIdx[1]")
-             .Filter("idx_1 != -1", "Valid muon in selected pair")
-             .Filter("idx_2 != -1", "Valid tau in selected pair");
+	if (deltar > 0.5) {
+	  validPair[i] = 1;
+	}
+      }
+    }
+    
+    // Find best muon based on pt
+    int idx_1 = -1;
+    float maxPt = -1;
+    for(size_t i = 0; i < numComb; i++) {
+      if(validPair[i] == 0) continue;
+      const auto tmp = comb[0][i];
+      if(maxPt < pt_1[tmp]) {
+	maxPt = pt_1[tmp];
+	idx_1 = tmp;
+      }
+    }
+    
+    // Find best tau based on iso
+    int idx_2 = -1;
+    float minIso = 999;
+    for(size_t i = 0; i < numComb; i++) {
+      if(validPair[i] == 0) continue;
+      if(int(comb[0][i]) != idx_1) continue;
+      
+      // COMPLETE THE FUNCTION
+      
+    }
+    
+    return std::vector<int>({idx_1, idx_2});
+  };
+  return df.Define("pairIdx", build_pair,
+		   {"goodMuons", "Muon_pt", "Muon_eta", "Muon_phi",
+		    "goodTaus", "Tau_relIso_all", "Tau_eta", "Tau_phi"})
+    .Define("idx_1", "pairIdx[0]")
+    .Define("idx_2", "pairIdx[1]")
 }
+
+
 
 
 /*
